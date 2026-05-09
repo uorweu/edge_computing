@@ -5,6 +5,10 @@ import soundfile as sf
 import resampy
 import csv
 
+# dung de xem RAM su dung
+import psutil 
+
+
 MODEL_PATH = "yamnet.tflite"
 CSV_PATH = "yamnet_class_map.csv"
 TARGET_FOLDER = "sounds_dataset/talk"
@@ -75,3 +79,18 @@ else:
         else:
             print(f"   └─ {results}")
         print("-" * 50)
+
+
+def print_memory_usage():
+    # Lấy ID của tiến trình hiện tại (chính là script này)
+    process = psutil.Process(os.getpid())
+    
+    # Lấy lượng RAM thực tế đang chiếm dụng (Resident Set Size - RSS)
+    mem_bytes = process.memory_info().rss
+    mem_mb = mem_bytes / (1024 * 1024)
+    
+    print(f"--- [RAM Usage]: {mem_mb:.2f} MB ---")
+# Sau khi load mô hình YAMNet (đây là lúc RAM tăng mạnh nhất)
+# model = load_yamnet_model() 
+print("Đã load model...")
+print_memory_usage()
