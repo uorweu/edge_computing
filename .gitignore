@@ -1,0 +1,46 @@
+# --- Python ---
+# Loại bỏ thư mục môi trường ảo (Thứ quan trọng nhất cần loại bỏ)
+venv/
+env/
+ENV/
+bin/
+lib/
+develop-eggs/
+dist/
+eggs/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+
+# Loại bỏ các file bytecode đã biên dịch (làm nặng repo)
+__pycache__/
+*.py[cod]
+*$py.class
+
+# --- Dự án SSSH / AI & Âm thanh ---
+# Loại bỏ các file âm thanh tạm thời hoặc kết quả chạy thử
+*.wav
+*.mp3
+*.flac
+*.tmp
+# Loại bỏ các file log dữ liệu đo đạc
+*.log
+data_raw/
+
+# --- Docker ---
+# Nếu bạn có các file cấu hình Docker cá nhân
+.dockerignore
+
+# --- Hệ điều hành (OS) ---
+# Loại bỏ file rác của Windows/Mac/Linux
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini

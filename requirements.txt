@@ -1,0 +1,8 @@
+cffi==2.0.0
+llvmlite==0.47.0
+numba==0.65.1
+numpy==1.26.4
+pycparser==3.0
+resampy==0.4.3
+soundfile==0.13.1
+tflite-runtime==2.14.0
