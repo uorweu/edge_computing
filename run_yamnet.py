@@ -4,93 +4,121 @@ import tflite_runtime.interpreter as tflite
 import soundfile as sf
 import resampy
 import csv
+import shutil
+import sys
 
-# dung de xem RAM su dung
-import psutil 
-
-
+# --- 1. CẤU HÌNH ---
 MODEL_PATH = "yamnet.tflite"
 CSV_PATH = "yamnet_class_map.csv"
-TARGET_FOLDER = "sounds_dataset/talk"
+TARGET_FOLDER = "my_dataset/Telephone bell ringing" # Chỉnh đường dẫn ở đây
+ERROR_FOLDER = "needs_review"
+CONFIDENCE_THRESHOLD = 0.8 
 
-print("🚀 Đang khởi động YAMNet...")
+# --- 2. BẢNG ÁNH XẠ ---
+LABEL_MAP = {
+    "Laughter": ["Laughter", "Chuckle, giggle", "Baby laughter", "Giggl"],
+    "Chewing, mastication": ["Chewing, mastication", "Biting", "Eating", "Crunch", "Mouth sound"],
+    "Keyboard typing": ["Keyboard typing", "Computer keyboard", "Clicking"],
+    "Squeak": ["Squeak", "Friction", "Door", "Tools"],
+    "Crowd": ["Crowd", "Chatter", "People babbling", "Speech"],
+    "Clicking": ["Clicking", "Mechanical click", "Writing", "Tick"],
+    "Telephone bell ringing": ["Telephone bell", "Ringtone", "Telephone", "Alarm clock", "Beep", "Busy signal", "Alarm"],
+    "bookflip": ["Pages turning", "Paper", "Shatter"],
+    "Footstep": ["Walk, footsteps"],
+    "Talking": ["Speech" , "Child speech, kid speaking"]
+}
 
-# 1. Load từ điển nhãn
+# --- 3. KHỞI TẠO AI ---
 class_names = []
 with open(CSV_PATH) as f:
     reader = csv.DictReader(f)
     for row in reader:
         class_names.append(row['display_name'])
 
-# 2. Load Model TFLite
 interpreter = tflite.Interpreter(model_path=MODEL_PATH)
 interpreter.allocate_tensors()
 input_details = interpreter.get_input_details()
 output_details = interpreter.get_output_details()
 
-def analyze_audio(file_path):
+def analyze_audio_safe(file_path):
+    """Chiến thuật mới: Đọc từng mẩu nhỏ từ đĩa cứng để không bao giờ treo RAM"""
     try:
-        data, sr = sf.read(file_path)
-        
-        # Chuyển về Mono nếu là Stereo
-        if len(data.shape) > 1:
-            data = np.mean(data, axis=1)
-            
-        # Resample về 16kHz
-        if sr != 16000:
-            data = resampy.resample(data, sr, 16000)
-            
-        # Lấy 15600 mẫu đầu tiên (0.975 giây) để test
-        input_data = np.array(data[:15600], dtype=np.float32)
-        if len(input_data) < 15600:
-            input_data = np.pad(input_data, (0, 15600 - len(input_data)))
-            
-        # Chạy AI
-        interpreter.set_tensor(input_details[0]['index'], input_data)
-        interpreter.invoke()
-        
-        scores = interpreter.get_tensor(output_details[0]['index'])[0]
-        top_3_indices = np.argsort(scores)[-3:][::-1]
-        
-        return [(class_names[i], scores[i]) for i in top_3_indices]
+        all_scores = []
+        with sf.SoundFile(file_path) as f:
+            sr = f.samplerate
+            # Quét từng khối 1 giây (sr mẫu mỗi lần)
+            while f.tell() < f.frames:
+                chunk = f.read(sr) # Đọc đúng 1 giây
+                
+                if len(chunk.shape) > 1: chunk = np.mean(chunk, axis=1)
+                
+                # Chỉ resample mẩu 1 giây này (Cực nhanh)
+                if sr != 16000:
+                    chunk = resampy.resample(chunk, sr, 16000)
+                
+                input_data = np.array(chunk[:15600], dtype=np.float32)
+                if len(input_data) < 15600:
+                    input_data = np.pad(input_data, (0, 15600 - len(input_data)))
+                
+                interpreter.set_tensor(input_details[0]['index'], input_data)
+                interpreter.invoke()
+                all_scores.append(interpreter.get_tensor(output_details[0]['index'])[0])
+                
+                # Giới hạn tối đa quét 30 đoạn để tránh file quá dài (tùy chọn)
+                if len(all_scores) >= 30: break 
+
+        if not all_scores: return "Silence", 0
+        avg_scores = np.mean(all_scores, axis=0)
+        top_idx = np.argmax(avg_scores)
+        return class_names[top_idx], avg_scores[top_idx]
     except Exception as e:
-        return f"Lỗi: {e}"
+        return f"Lỗi: {str(e)[:10]}", 0
 
-# 3. Quét thư mục
+# --- 4. CHƯƠNG TRÌNH CHÍNH ---
+print(f"🚀 Đang quét: {TARGET_FOLDER}", flush=True)
+
 if not os.path.exists(TARGET_FOLDER):
-    print(f"❌ Không tìm thấy thư mục: {TARGET_FOLDER}. Bạn đã để file âm thanh vào đây chưa?")
+    print(f"❌ Không thấy folder: {TARGET_FOLDER}")
+    sys.exit()
+
+# Tự động nhận diện folder lẻ hoặc tổng
+wavs = [f for f in os.listdir(TARGET_FOLDER) if f.endswith('.wav')]
+if wavs:
+    folders_to_scan = [(os.path.basename(TARGET_FOLDER.strip('/')), TARGET_FOLDER)]
 else:
-    print(f"📁 Bắt đầu phân tích các file trong: {TARGET_FOLDER}\n")
-    print("-" * 50)
+    sub = sorted([d for d in os.listdir(TARGET_FOLDER) if os.path.isdir(os.path.join(TARGET_FOLDER, d))])
+    folders_to_scan = [(d, os.path.join(TARGET_FOLDER, d)) for d in sub]
+
+summary = []
+for group_name, folder_path in folders_to_scan:
+    files = sorted([f for f in os.listdir(folder_path) if f.endswith('.wav')])
+    if not files: continue
     
-    files = [f for f in os.listdir(TARGET_FOLDER) if f.endswith('.wav')]
-    if not files:
-        print("Trống! Không có file .wav nào.")
-        
+    print(f"\n📂 Nhóm: [{group_name}]")
+    print("-" * 65, flush=True)
+    correct = 0
+
     for filename in files:
-        print(f"🎧 Đang nghe: {filename}")
-        results = analyze_audio(os.path.join(TARGET_FOLDER, filename))
+        path = os.path.join(folder_path, filename)
+        pred, score = analyze_audio_safe(path)
         
-        if isinstance(results, list):
-            for name, score in results:
-                # Đánh dấu 🔥 nếu AI nghe thấy tiếng người/xì xầm
-                marker = "🔥" if name in ["Speech", "Babble", "Chatter", "Conversation"] else "  "
-                print(f"   {marker} ├─ {name}: {score:.2f}")
+        valid = LABEL_MAP.get(group_name, [group_name])
+        is_match = any(v.lower().strip() in pred.lower().strip() for v in valid)
+
+        if is_match and score >= CONFIDENCE_THRESHOLD:
+            correct += 1
+            print(f" ✅ {filename[:15]:<15} | Đúng ({pred} - {score:.2f})", flush=True)
         else:
-            print(f"   └─ {results}")
-        print("-" * 50)
-
-
-def print_memory_usage():
-    # Lấy ID của tiến trình hiện tại (chính là script này)
-    process = psutil.Process(os.getpid())
+            print(f" ❌ {filename[:15]:<15} | Sai (AI đoán: {pred} - {score:.2f})", flush=True)
+            err_p = os.path.join(ERROR_FOLDER, group_name)
+            os.makedirs(err_p, exist_ok=True)
+            shutil.copy(path, os.path.join(err_p, filename))
     
-    # Lấy lượng RAM thực tế đang chiếm dụng (Resident Set Size - RSS)
-    mem_bytes = process.memory_info().rss
-    mem_mb = mem_bytes / (1024 * 1024)
-    
-    print(f"--- [RAM Usage]: {mem_mb:.2f} MB ---")
-# Sau khi load mô hình YAMNet (đây là lúc RAM tăng mạnh nhất)
-# model = load_yamnet_model() 
-print("Đã load model...")
-print_memory_usage()
+    summary.append({'name': group_name, 'correct': correct, 'total': len(files)})
+
+# --- 5. TỔNG KẾT ---
+print("\n" + "="*75)
+print(f"{'TÊN THƯ MỤC':<30} | {'ĐÚNG/TỔNG':<15} | {'ĐỘ CHÍNH XÁC'}")
+for s in summary:
+    acc = (s['correct'] / s['total']) * 100
+    print(f"{s['name']:<30} | {s['correct']:>5}/{s['total']:<9} | {acc:>10.2f}%")
